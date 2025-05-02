@@ -1,6 +1,7 @@
 from typing import Final
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+import openai
 
 TOKEN: Final = ''
 BOT_USERNAME: Final = ''
@@ -57,6 +58,46 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def error(update: Update, context: ContextTypes.DEFAULT_TYPE): 
     print(f'Update {update} caused error {context.error}')
+
+# ai chat bot
+openai.api_key = ""
+
+def chat_with_gpt(prompt): 
+    response = openai.chat.completions.create(
+        model = "gpt-3.5-turbo",
+        messages = [{"role": "user", "content": prompt}]
+    )   
+    return response.choices[0].message.content.strip()
+
+#get rag response
+def get_rag_response(user_input):
+    # This is where you embed the user_input, search your DB, etc.
+    # context = "Your Excel knowledge base context here..."
+
+    # Combine context with user question
+    # prompt = f"Answer the question based on the following context:\n{context}\n\nQuestion: {user_input}"
+    prompt = user_input
+    return chat_with_gpt(prompt)
+
+async def handle_ai_message(update: Update, context: ContextTypes.DEFAULT_TYPE): 
+    message_type: str = update.message.chat.type
+    text: str = update.message.text
+
+    print(f'User ({update.message.chat.id}) in {message_type}: "{text}"')
+
+    if message_type == 'group':
+        if BOT_USERNAME in text:
+            new_text: str = text.replace(BOT_USERNAME, '').strip()
+            user_input = new_text
+        else:
+            return
+    else:
+        user_input = text
+
+    rag_response = get_rag_response(user_input)
+
+    print('Bot:', rag_response)
+    await update.message.reply_text(rag_response)
 
 if __name__ == '__main__': 
     print('Start polling...')
