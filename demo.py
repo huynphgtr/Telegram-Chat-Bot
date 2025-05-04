@@ -99,6 +99,59 @@ async def handle_ai_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print('Bot:', rag_response)
     await update.message.reply_text(rag_response)
 
+# llamma chat bot
+import torch
+from transformers import pipeline
+
+def chat_with_model(user_input): 
+    pipe = pipeline("text-generation", model="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+                    torch_dtype=torch.bfloat16,device_map="auto")
+
+    messages = [
+    {
+        "role": "system",
+        "content": "You are a helpful, friendly assistant who provides clear and accurate information in a professional tone.",
+    }
+    ]
+
+    # Thêm tin nhắn người dùng vào lịch sử
+    messages.append({"role": "user", "content": user_input})
+
+    # Tạo prompt từ lịch sử hội thoại
+    prompt = pipe.tokenizer.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True
+    )
+
+    # Sinh câu trả lời
+    outputs = pipe(prompt,max_new_tokens=128,do_sample=True,temperature=0.7,top_k=50,top_p=0.95)
+
+    # Tách phần trả lời ra khỏi prompt
+    full_output = outputs[0]["generated_text"]
+    response = full_output[len(prompt):].strip()
+    # Thêm phản hồi của bot vào lịch sử
+    messages.append({"role": "assistant", "content": response})
+
+    return response
+
+async def handle_model_message(update: Update, context: ContextTypes.DEFAULT_TYPE): 
+    message_type: str = update.message.chat.type
+    text: str = update.message.text
+
+    print(f'User ({update.message.chat.id}) in {message_type}: "{text}"')
+
+    if message_type == 'group':
+        if BOT_USERNAME in text:
+            new_text: str = text.replace(BOT_USERNAME, '').strip()
+            user_input = new_text
+        else:
+            return
+    else:
+        user_input = text
+    
+    response = chat_with_model(user_input)
+    print('Bot:', response)
+    await update.message.reply_text(response)
+
 if __name__ == '__main__': 
     print('Start polling...')
     app = Application.builder().token(TOKEN).build()
