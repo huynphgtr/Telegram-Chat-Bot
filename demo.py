@@ -69,15 +69,87 @@ def chat_with_gpt(prompt):
     )   
     return response.choices[0].message.content.strip()
 
-#get rag response
-def get_rag_response(user_input):
-    # This is where you embed the user_input, search your DB, etc.
-    # context = "Your Excel knowledge base context here..."
+#đọc pdf, chuyển đổi sang text
+def read_pdf_text(file_path):
+    doc = fitz.open(file_path)
+    full_text = ""
+    for page in doc:
+        full_text += page.get_text()
+    return full_text
 
-    # Combine context with user question
-    # prompt = f"Answer the question based on the following context:\n{context}\n\nQuestion: {user_input}"
-    prompt = user_input
+#chunk text
+def chunk_text(text, chunk_size=500):
+    return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
+
+#tạo embedding cho từng chunks
+client = OpenAI(api_key="")
+
+def get_embedding(text):
+    response = client.embeddings.create(
+        model="text-embedding-ada-002",
+        input=text
+    )
+    return response.data[0].embedding
+
+#tìm các đoạn gần nhất
+from sklearn.metrics.pairwise import cosine_similarity
+def find_relevant_chunks(query, chunks, chunk_embeddings, top_k=3):
+    query_embedding = np.array(get_embedding(query)).reshape(1, -1)
+    similarities = cosine_similarity(query_embedding, chunk_embeddings)[0]
+    top_indices = similarities.argsort()[-top_k:][::-1]
+    return [chunks[i] for i in top_indices]
+
+#lưu embedding
+def process_pdf(file_path, cache_path="embeddings.pkl"):
+    # Nếu đã có file cache thì load lại
+    if os.path.exists(cache_path):
+        print("Đã có embedding, đang load từ file...")
+        with open(cache_path, "rb") as f:
+            chunks, chunk_embeddings = pickle.load(f)
+    else:
+        print("Chưa có embedding, bắt đầu xử lý...")
+        text = read_pdf_text(file_path)
+        chunks = chunk_text(text)
+        chunk_embeddings = [get_embedding(chunk) for chunk in chunks]
+        # Lưu lại
+        with open(cache_path, "wb") as f:
+            pickle.dump((chunks, chunk_embeddings), f)
+        print("Đã lưu embedding vào file cache.")
+
+    return chunks, chunk_embeddings
+
+#get rag response
+chunks, chunk_embeddings = process_pdf("")
+
+def get_rag_response(user_input):
+    relevant_chunks = find_relevant_chunks(user_input, chunks, chunk_embeddings)
+    context = "\n".join(relevant_chunks)
+
+    prompt = f"""Based on the following content, answer the user's question:
+                 {context} 
+                 Question: {user_input}"""
     return chat_with_gpt(prompt)
+
+
+async def handle_ai_message(update: Update, context: ContextTypes.DEFAULT_TYPE): 
+    message_type: str = update.message.chat.type
+    text: str = update.message.text
+
+    print(f'User ({update.message.chat.id}) in {message_type}: "{text}"')
+
+    if message_type == 'group':
+        if BOT_USERNAME in text:
+            new_text: str = text.replace(BOT_USERNAME, '').strip()
+            user_input = new_text
+        else:
+            return
+    else:
+        user_input = text
+
+    rag_response = get_rag_response(user_input)
+
+    print('Bot:', rag_response)
+    await update.message.reply_text(rag_response)
 
 async def handle_ai_message(update: Update, context: ContextTypes.DEFAULT_TYPE): 
     message_type: str = update.message.chat.type
